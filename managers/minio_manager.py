@@ -1,7 +1,6 @@
 import datetime
 import os
 import json
-import logging
 import traceback
 import requests
 import urllib3
@@ -10,11 +9,7 @@ import certifi
 from minio import Minio
 from minio.commonconfig import REPLACE, CopySource
 
-from envparse import env
 from managers.simple_logger import logger
-
-
-env.read_envfile()
 
 
 class MockSettings:
@@ -90,6 +85,7 @@ def get_minio_managers() -> dict:
 
 def get_mc_client(url: str = None):
     """Получить mc client
+       работает только под vpn
        #wget https://dl.minio.io/client/mc/release/linux-amd64/mc # darwin-arm64
     """
     if not url:
@@ -166,14 +162,8 @@ class MinioManager:
 
     def create_mc_alias(self, alias_name: str, mc_client_url: str = None):
         """Создать алиас для минио
-           :param credentials: словарь с доступами
-            {
-                'url' : 'https://cdn.ru:443',
-                'accessKey': '',
-                'secretKey': '',
-                'api': 's3v4',
-                'path': 'auto'
-            }
+           :param alias_name: название алиаса для s3
+           :param mc_client_url: адрес, откуда скачиваем клиент mc
         """
         mc_client = get_mc_client(url=mc_client_url)
         cred_json = '/tmp/credentials.json'
@@ -310,6 +300,33 @@ class MinioManager:
             remote_name,
             expires=expires,
         )
+
+    @staticmethod
+    def recursive_copy(mm_src, mm_dst, remote_name: str = ''):
+        """Рекурсивное копирование из одного s3 в другое через локальную папку
+           TODO: параллельно в потоках
+           :param mm_src: менеджер минио источник
+           :param mm_dst: менеджер минио приемник
+           :param remote_name: путь к папке с которой начинаем рекурсивный обход
+        """
+        for obj in mm_src.list_objects(remote_name=remote_name):
+            if obj.is_dir:
+                logger.info('DIR: %s' % obj.object_name)
+                MinioManager.recursive_copy(mm_src=mm_src, mm_dst=mm_dst, remote_name=obj.object_name)
+            else:
+                try:
+                    mm_dst.stat_object(remote_name=obj.object_name)
+                    logger.info('already exists %s' % obj.object_name)
+                    continue
+                except Exception:
+                    logger.info('prepare for copy %s' % obj.object_name)
+
+                file_name = obj.object_name.split('/')[-1]
+                local_path = '/tmp/%s' % file_name
+                mm_src.download(remote_name=obj.object_name, local_path=local_path)
+                mm_dst.upload(remote_name=obj.object_name, local_path=local_path)
+                os.unlink(local_path)
+                logger.info('%s copied' % obj.object_name)
 
     def vol_data_script(self):
         """Загружает данные по месту на диске в bucket=vol-data
