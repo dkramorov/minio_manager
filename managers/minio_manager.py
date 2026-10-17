@@ -20,7 +20,7 @@ try:
     from django.conf import settings
     hasattr(settings, 'DEBUG')
 except Exception as e:
-    logger.info('Exception from django.conf import settings: %s' % e)
+    #logger.info('Exception from django.conf import settings: %s' % e)
     settings = MockSettings()
 
 
@@ -86,10 +86,11 @@ def get_minio_managers() -> dict:
 def get_mc_client(url: str = None):
     """Получить mc client
        работает только под vpn
-       #wget https://dl.minio.io/client/mc/release/linux-amd64/mc # darwin-arm64
+       wget https://dl.min.io/aistor/mc/release/linux-amd64/mc
+       curl --progress-bar -O https://dl.min.io/aistor/mc/release/darwin-arm64/mc
     """
     if not url:
-        url = 'https://dl.minio.io/client/mc/release/darwin-arm64/mc'
+        url = 'https://dl.min.io/aistor/mc/release/darwin-arm64/mc'
     mc_client = '/tmp/mc'
     if not os.path.exists(mc_client):
         r = requests.get(url, stream=True)
@@ -104,23 +105,17 @@ def get_mc_client(url: str = None):
 class MinioManager:
     """Работа с хранилищем Minio
         https://min.io/docs/minio/linux/developers/python/API.html
-
         print('check_bucket', MinioManager().check_bucket())
-
         print('download',
               MinioManager().download('public_/4z/pg/a095ekkzdfy65xwas147nl20jtwr.flac',
                                       '/Users/jocker/Downloads/test.flac'))
-
         print('upload',
               MinioManager().upload('public_/potestua.flac', '/Users/jocker/Downloads/test.flac'))
-
         print('download',
               MinioManager().download('public_/potestua.flac',
                                       '/Users/jocker/Downloads/test2.flac'))
-
         print('drop',
               MinioManager().drop('public_/potestua.flac'))
-
         Есть проблема с urllib3.PoolManager(maxsize=10...
         mcedit env/lib/python3.10/site-packages/minio/api.py
         стоит переопределить init
@@ -170,6 +165,7 @@ class MinioManager:
         with open(cred_json, 'w+', encoding='utf-8') as f:
             f.write(json.dumps(self.get_credentials()))
         os.system('%s alias import %s %s' % (mc_client, alias_name, cred_json))
+        # ./mc alias set myminio http://127.0.0.1:9000 accessKey secretKey
 
     def check_bucket(self, with_create: bool = True, with_anonymous_policy: bool = True):
         """Создает или проверяет bucket"""
@@ -330,7 +326,8 @@ class MinioManager:
 
     def vol_data_script(self):
         """Загружает данные по месту на диске в bucket=vol-data
-           USAGE: vol_data.sh minio-archive-3.prod.infra... 9003 key secret /DISK2
+           USAGE:
+               vol_data.sh minio-archive-3.prod.infra... 9003 key secret /DISK2
         """
         return """
 #!/bin/bash
@@ -363,4 +360,19 @@ curl -k -m 20 -v -X PUT -T "${file}" \
           -H "Content-Type: ${content_type}" \
           -H "Authorization: AWS ${s3_key}:${signature}" \
           http$prefix://$host:$MINIO_PORT${resource}
-    """.stript()
+    """.strip()
+
+"""
+mc mirror --overwrite --remove source-alias/my-bucket target-alias/my-bucket --fake
+--overwrite — принудительно перезапишет файлы на целевом сервере (target-alias),
+              если их размер или дата изменения отличаются от исходных файлов на source-alias
+--remove — удалит на целевом сервере те файлы, которых уже нет на исходном сервере
+
+upload over curl 7.75+
+curl --progress-bar \
+  -X PUT \
+  --user "YOUR_AWS_ACCESS_KEY_ID:YOUR_AWS_SECRET_ACCESS_KEY" \
+  --aws-sigv4 "aws:amz:us-east-1:s3" \
+  --upload-file "filename.txt" \
+  "https://amazonaws.com/bucket/filename.txt
+"""
